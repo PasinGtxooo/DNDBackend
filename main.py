@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, origins="*")
 
 cred = credentials.Certificate({
     "type":                        os.getenv("FIREBASE_TYPE", "service_account"),
