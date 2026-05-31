@@ -10,6 +10,18 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app, origins="*")
 
+@app.after_request
+def add_cors_headers(response):
+    response.headers['Access-Control-Allow-Origin']  = '*'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PATCH, DELETE, OPTIONS'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+    return response
+
+@app.route('/', defaults={'path': ''}, methods=['OPTIONS'])
+@app.route('/<path:path>', methods=['OPTIONS'])
+def handle_options(**_):
+    return '', 204
+
 cred = credentials.Certificate({
     "type":                        os.getenv("FIREBASE_TYPE", "service_account"),
     "project_id":                  os.getenv("FIREBASE_PROJECT_ID"),
