@@ -22,13 +22,133 @@ cred = credentials.Certificate({
     "auth_provider_x509_cert_url": os.getenv("FIREBASE_AUTH_PROVIDER_CERT_URL"),
     "client_x509_cert_url":        os.getenv("FIREBASE_CLIENT_CERT_URL"),
 })
-firebase_admin.initialize_app(cred)
+if not firebase_admin._apps:
+    firebase_admin.initialize_app(cred)
 db = firestore.client()
 
 # ── helpers ──────────────────────────────────────────────
-PLAYERS = lambda: db.collection('DND').document('players').collection('player_list')
-ALIENS  = lambda: db.collection('DND').document('aliens').collection('alien_list')
-P_ALIENS = lambda pid: PLAYERS().document(pid).collection('aliens')
+PLAYERS    = lambda: db.collection('DND').document('players').collection('player_list')
+ALIENS     = lambda: db.collection('DND').document('aliens').collection('alien_list')
+P_ALIENS   = lambda pid: PLAYERS().document(pid).collection('aliens')
+META       = lambda: db.collection('DND').document('meta')
+CHARACTERS = lambda: db.collection('DND').document('characters').collection('character_list')
+SESSIONS   = lambda: db.collection('DND').document('sessions').collection('session_list')
+
+EMPTY_ALIEN = {
+    'rank': None, 'species': None,
+    'hp': None, 'hp_max': None, 'ac': None, 'speed': None,
+    'STR': None, 'DEX': None, 'CON': None,
+    'INT': None, 'WIS': None, 'CHA': None,
+    'abilities': [], 'weaknesses': [], 'items': [],
+}
+
+
+def _build_empty_slots(filled: int, total: int) -> list:
+    """สร้าง empty slot list ให้ครบ total โดยไม่บันทึก DB"""
+    count = max(0, total - filled)
+    slots = []
+    for i in range(count):
+        alien_id = 'empty_slot' if count == 1 else f'empty_slot_{i + 1}'
+        name     = 'Empty Slot'  if count == 1 else f'Empty Slot {i + 1}'
+        slots.append({'alien_id': alien_id, 'name': name, **EMPTY_ALIEN})
+    return slots
+
+
+# ═══════════════════════════════════════════════
+#  CAMPAIGN META
+# ═══════════════════════════════════════════════
+
+@app.route('/meta', methods=['GET'])
+def get_meta():
+    doc = META().get()
+    data = doc.to_dict() if doc.exists else {}
+    return jsonify({
+        'campaign':              data.get('campaign',              'Ben 10 D&D'),
+        'session':               data.get('session',               1),
+        'total_xp_to_level_3':  data.get('total_xp_to_level_3',  2700),
+    }), 200
+
+@app.route('/meta', methods=['PATCH'])
+def patch_meta():
+    data = request.get_json()
+    META().set(data, merge=True)
+    return jsonify({'message': 'Meta updated.'}), 200
+
+
+# ═══════════════════════════════════════════════
+#  STORY CHARACTERS
+# ═══════════════════════════════════════════════
+
+@app.route('/characters', methods=['GET'])
+def get_characters():
+    docs = CHARACTERS().stream()
+    return jsonify({doc.id: doc.to_dict() for doc in docs}), 200
+
+@app.route('/character', methods=['POST'])
+def add_character():
+    data = request.get_json()
+    char_id = data.get('character_id')
+    if not char_id:
+        return jsonify({'message': 'character_id is required'}), 400
+    CHARACTERS().document(char_id).set({
+        'name':       data.get('name'),
+        'faction':    data.get('faction', 'unknown'),  # ally | enemy | unknown
+        'species':    data.get('species'),
+        'status':     data.get('status'),
+        'extra_info': data.get('extra_info'),
+        'image_url':  data.get('image_url'),
+        'hp':         data.get('hp'),
+        'ac':         data.get('ac'),
+    })
+    return jsonify({'message': f'Character {char_id} created.'}), 201
+
+@app.route('/character/<char_id>', methods=['PATCH'])
+def patch_character(char_id):
+    data = request.get_json()
+    CHARACTERS().document(char_id).update(data)
+    return jsonify({'message': f'Character {char_id} updated.'}), 200
+
+@app.route('/character/<char_id>', methods=['DELETE'])
+def delete_character(char_id):
+    CHARACTERS().document(char_id).delete()
+    return jsonify({'message': f'Character {char_id} deleted.'}), 200
+
+
+# ═══════════════════════════════════════════════
+#  SESSIONS
+# ═══════════════════════════════════════════════
+
+@app.route('/sessions', methods=['GET'])
+def get_sessions():
+    docs = SESSIONS().order_by('session').stream()
+    return jsonify({doc.id: doc.to_dict() for doc in docs}), 200
+
+@app.route('/session', methods=['POST'])
+def add_session():
+    data = request.get_json()
+    session_num = data.get('session')
+    if session_num is None:
+        return jsonify({'message': 'session is required'}), 400
+    session_id = f'session_{session_num}'
+    SESSIONS().document(session_id).set({
+        'session':           session_num,
+        'title':             data.get('title'),
+        'summary':           data.get('summary'),
+        'player_upgrades':   data.get('player_upgrades',   {}),
+        'character_notes':   data.get('character_notes',   {}),
+    })
+    return jsonify({'message': f'Session {session_num} created.'}), 201
+
+@app.route('/session/<session_id>', methods=['PATCH'])
+def patch_session(session_id):
+    data = request.get_json()
+    SESSIONS().document(session_id).update(data)
+    return jsonify({'message': f'Session {session_id} updated.'}), 200
+
+@app.route('/session/<session_id>', methods=['DELETE'])
+def delete_session(session_id):
+    SESSIONS().document(session_id).delete()
+    return jsonify({'message': f'Session {session_id} deleted.'}), 200
 
 
 # ═══════════════════════════════════════════════
@@ -82,6 +202,7 @@ def add_master_alien():
     ALIENS().document(alien_id).set({
         'name':       data.get('name'),
         'rank':       data.get('rank'),
+        'species':    data.get('species'),
         'hp':         data.get('hp'),
         'hp_max':     data.get('hp_max'),
         'ac':         data.get('ac'),
@@ -119,6 +240,51 @@ def get_all_players():
     docs = PLAYERS().stream()
     return jsonify({doc.id: doc.to_dict() for doc in docs}), 200
 
+@app.route('/players/full', methods=['GET'])
+def get_players_full():
+    """ดึงข้อมูลทุกอย่างในรูปแบบ players.json พร้อม aliens embed + empty slots"""
+    meta_doc = META().get()
+    meta = meta_doc.to_dict() if meta_doc.exists else {}
+
+    result = {
+        'campaign':             meta.get('campaign',             'Ben 10 D&D'),
+        'session':              meta.get('session',              1),
+        'total_xp_to_level_3': meta.get('total_xp_to_level_3', 2700),
+        'players': [],
+    }
+
+    for pdoc in PLAYERS().stream():
+        p   = pdoc.to_dict()
+        pid = pdoc.id
+
+        # รวม aliens จาก subcollection เป็น list
+        aliens = []
+        for adoc in P_ALIENS(pid).stream():
+            a = adoc.to_dict()
+            a['alien_id'] = adoc.id
+            aliens.append(a)
+
+        # เติม empty slots ให้ครบ omnitrix_slots
+        slots = p.get('omnitrix_slots', 0)
+        aliens += _build_empty_slots(len(aliens), slots)
+
+        result['players'].append({
+            'player_id':         pid,
+            'player_name':       p.get('name'),
+            'level':             p.get('level'),
+            'xp':                p.get('xp'),
+            'hp':                p.get('hp'),
+            'hp_max':            p.get('hp_max'),
+            'status_effects':    p.get('status_effects',    []),
+            'omnitrix_cooldown': p.get('omnitrix_cooldown', False),
+            'upgrade':           p.get('upgrade'),
+            'inventory':         p.get('inventory',         []),
+            'omnitrix_slots':    slots,
+            'aliens':            aliens,
+        })
+
+    return jsonify(result), 200
+
 @app.route('/player/<player_id>', methods=['GET'])
 def get_player(player_id):
     doc = PLAYERS().document(player_id).get()
@@ -139,6 +305,8 @@ def add_player():
         'xp':                data.get('xp'),
         'hp':                data.get('hp'),
         'hp_max':            data.get('hp_max'),
+        'omnitrix_slots':    data.get('omnitrix_slots', 10),
+        'upgrade':           data.get('upgrade'),
         'active_alien':      None,
         'omnitrix_cooldown': False,
         'status_effects':    [],
@@ -193,9 +361,10 @@ def add_player_alien(player_id):
     def pick(key):
         return data.get(key) if data.get(key) is not None else base.get(key)
 
-    # rank เป็น field ของ master alien เท่านั้น ไม่ copy ไป player
     merged = {
         'name':       data.get('name') or base.get('name'),
+        'rank':       pick('rank'),
+        'species':    pick('species'),
         'hp':         pick('hp'),
         'hp_max':     pick('hp_max'),
         'ac':         pick('ac'),
