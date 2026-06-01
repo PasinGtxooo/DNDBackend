@@ -143,11 +143,18 @@ def add_session():
         return jsonify({'message': 'session is required'}), 400
     session_id = f'session_{session_num}'
     SESSIONS().document(session_id).set({
-        'session':           session_num,
-        'title':             data.get('title'),
-        'summary':           data.get('summary'),
-        'player_upgrades':   data.get('player_upgrades',   {}),
-        'character_notes':   data.get('character_notes',   {}),
+        'session':            session_num,
+        'title':              data.get('title'),
+        'summary':            data.get('summary'),
+        'xp_gained':          data.get('xp_gained'),
+        'xp_total':           data.get('xp_total'),
+        'level_after':        data.get('level_after'),
+        'missions_completed': data.get('missions_completed',  []),
+        'key_events':         data.get('key_events',          []),
+        'loot':               data.get('loot',                []),
+        'player_upgrades':    data.get('player_upgrades',     {}),
+        'character_notes':    data.get('character_notes',     {}),
+        'best_quotes':        data.get('best_quotes',         []),
     })
     return jsonify({'message': f'Session {session_num} created.'}), 201
 
